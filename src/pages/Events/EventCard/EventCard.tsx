@@ -13,6 +13,7 @@ import { useTheme } from '@emotion/react'
 
 interface IProps {
   event: IEvent
+  isPastEvent?: boolean
   needsModeration: boolean
   moderateEvent: (event: IEvent, accepted: boolean) => void
 }
@@ -27,6 +28,7 @@ export const EventCard = (props: IProps) => {
           flexDirection: ['column', 'column', 'initial'],
           position: 'relative',
           padding: 3,
+          opacity: props.isPastEvent ? '0.6' : null,
         }}
         data-cy="card"
         data-eventid={props.event._id}
