@@ -138,7 +138,7 @@ const ResearchUpdate: React.FC<IProps> = ({
             </Box>
             <ResearchComments
               update={update}
-              comments={comments}
+              comments={comments as any}
               updateIndex={updateIndex}
             />
           </Card>
