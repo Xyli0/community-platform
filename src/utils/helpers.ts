@@ -1,26 +1,26 @@
 import { isObservableObject, toJS } from 'mobx'
+import type { IResearch } from 'src/models'
 import type { DBDoc, IModerable } from 'src/models/common.models'
 import type { IMapPin } from 'src/models/maps.models'
 import type { IUser } from 'src/models/user.models'
+import type { IItem } from 'src/stores/common/FilterSorterDecorator/FilterSorterDecorator'
+
+const specialCharactersPattern = /[^a-zA-Z0-9_-]/gi
 
 // remove special characters from string, also replacing spaces with dashes
 export const stripSpecialCharacters = (text: string) => {
   return text
-    ? text
-        .split(' ')
-        .join('-')
-        .replace(/[^a-zA-Z0-9_-]/gi, '')
+    ? text.split(' ').join('-').replace(specialCharactersPattern, '')
     : ''
 }
+
+// get special characters from string using the same pattern as stripSpecialCharacters
+export const getSpecialCharacters = (text: string): string[] =>
+  Array.from(text.matchAll(specialCharactersPattern)).map((x) => x[0])
 
 // convert to lower case and remove any special characters
 export const formatLowerNoSpecial = (text: string) => {
   return stripSpecialCharacters(text).toLowerCase()
-}
-
-// remove dashes with spaces
-export const replaceDashesWithSpaces = (str: string) => {
-  return str ? str.replace(/-/g, ' ') : ''
 }
 
 // take an array of objects and convert to an single object, using a unique key
@@ -29,7 +29,7 @@ export const replaceDashesWithSpaces = (str: string) => {
 export const arrayToJson = (arr: any[], keyField: string) => {
   const json = {}
   arr.forEach((el) => {
-    if (el.hasOwnProperty(keyField)) {
+    if (Object.prototype.hasOwnProperty.call(el, keyField)) {
       const key = el[keyField]
       json[key] = el
     }
@@ -75,27 +75,12 @@ export const randomID = () => {
 /************************************************************************
  *              Date Methods
  ***********************************************************************/
-export const timestampToYear = (timestamp: number) => {
-  const date = new Date(timestamp * 1000)
-  return date.getFullYear()
-}
-
 export const getMonth = (d: Date, monthType: 'long' | 'short' = 'long') => {
   // use ECMAScript Internationalization API to return month
   return `${d.toLocaleString('en-us', { month: monthType })}`
 }
 export const getDay = (d: Date) => {
   return `${d.getDate()}`
-}
-
-/************************************************************************
- *             Validators
- ***********************************************************************/
-export const isEmail = (email: string) => {
-  // eslint-disable-next-line
-  const re =
-    /^(([^<>()[\]\\.,;:\s@\"]+(\.[^<>()[\]\\.,;:\s@\"]+)*)|(\".+\"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/
-  return re.test(email)
 }
 
 export const hasAdminRights = (user?: IUser) => {
@@ -123,18 +108,23 @@ export const needsModeration = (doc: IModerable, user?: IUser) => {
   return doc.moderation !== 'accepted'
 }
 
-export const isAllowToEditContent = (doc: IEditableDoc, user?: IUser) => {
+export const isAllowedToEditContent = (
+  doc: IEditableDoc & { collaborators?: string[] },
+  user?: IUser,
+) => {
   if (!user) {
     return false
   }
   if (isObservableObject(user)) {
     user = toJS(user)
   }
-  const roles =
-    user.userRoles && Array.isArray(user.userRoles) ? user.userRoles : []
+
+  if (doc.collaborators?.includes(user.userName)) {
+    return true
+  }
+
   if (
-    roles.includes('admin') ||
-    roles.includes('super-admin') ||
+    hasAdminRights(user) ||
     (doc._createdBy && doc._createdBy === user.userName)
   ) {
     return true
@@ -143,7 +133,26 @@ export const isAllowToEditContent = (doc: IEditableDoc, user?: IUser) => {
   }
 }
 
-export const isAllowToPin = (pin: IMapPin, user?: IUser) => {
+export const isAllowedToDeleteContent = (doc: IEditableDoc, user?: IUser) => {
+  if (!user) {
+    return false
+  }
+
+  if (isObservableObject(user)) {
+    user = toJS(user)
+  }
+
+  const roles =
+    user.userRoles && Array.isArray(user.userRoles) ? user.userRoles : []
+
+  return (
+    roles.includes('admin') ||
+    roles.includes('super-admin') ||
+    doc._createdBy! === user.userName
+  )
+}
+
+export const isAllowedToPin = (pin: IMapPin, user?: IUser) => {
   if (hasAdminRights(user) || (pin._id && user && pin._id === user.userName)) {
     return true
   } else {
@@ -151,15 +160,36 @@ export const isAllowToPin = (pin: IMapPin, user?: IUser) => {
   }
 }
 
+export const calculateTotalComments = (item: IResearch.ItemDB | IItem) => {
+  if (item.updates) {
+    const commentOnUpdates = item.updates.reduce((totalComments, update) => {
+      const updateCommentsLength =
+        !update._deleted && update.status !== 'draft' && update.comments
+          ? update.comments.length
+          : 0
+      return totalComments + updateCommentsLength
+    }, 0)
+
+    return commentOnUpdates ? String(commentOnUpdates) : '0'
+  } else {
+    return '0'
+  }
+}
+
+export const getPublicUpdates = (item: IResearch.ItemDB) => {
+  if (item.updates) {
+    return item.updates.filter(
+      (update) => update.status !== 'draft' && !update._deleted,
+    )
+  } else {
+    return []
+  }
+}
+
 // ensure docs passed to edit check contain _createdBy field
-interface IEditableDoc extends DBDoc {
+export interface IEditableDoc extends DBDoc {
   _createdBy: string
 }
 
-// Convert theme em string to px number
-export const emStringToPx = (width) => Number(width.replace('em', '')) * 16
-
-export function randomIntFromInterval(min, max) {
-  // min and max included
-  return Math.floor(Math.random() * (max - min + 1) + min)
-}
+export const randomIntFromInterval = (min, max) =>
+  Math.floor(Math.random() * (max - min + 1) + min)

@@ -1,16 +1,17 @@
-import { BehaviorSubject, Subscription } from 'rxjs'
-import { stripSpecialCharacters } from 'src/utils/helpers'
 import isUrl from 'is-url'
-import type { ISelectedTags } from 'src/models/tags.model'
-import type { IDBEndpoint, ILocation } from 'src/models/common.models'
-import { includesAll } from 'src/utils/filters'
-import type { RootStore } from '../index'
-import type { IConvertedFileMeta } from 'src/types'
-import type { IUploadedFileMeta } from '../storage'
-import { Storage } from '../storage'
+import { BehaviorSubject, Subscription } from 'rxjs'
 import { useCommonStores } from 'src/index'
 import { logger } from 'src/logger'
+import { includesAll } from 'src/utils/filters'
+import { stripSpecialCharacters } from 'src/utils/helpers'
 
+import { Storage } from '../storage'
+
+import type { ISelectedTags } from 'src/models/tags.model'
+import type { IDBEndpoint, ILocation } from 'src/models/common.models'
+import type { RootStore } from '../index'
+import type { IConvertedFileMeta } from '../../types'
+import type { IUploadedFileMeta } from '../storage'
 /**
  * The module store is used to share methods and data between other stores, including
  * `db` - the common database
@@ -27,8 +28,35 @@ export class ModuleStore {
   isInitialized = false
 
   // when a module store is initiated automatically load the docs in the collection
+  /****************************************************************************
+   *            Data Validation Methods
+   * **************************************************************************/
+  public isTitleThatReusesSlug = async (title: string, originalId?: string) => {
+    const slug = stripSpecialCharacters(title).toLowerCase()
+
+    // check for previous titles
+    const previousMatches = await this.db
+      .collection(this.basePath!)
+      .getWhere('previousSlugs', 'array-contains', slug)
+    const previousOtherMatches = previousMatches.filter(
+      (match) => match._id !== originalId,
+    ) // exclude current document
+
+    // check for current titles
+    const currentMatches = await this.db
+      .collection(this.basePath!)
+      .getWhere('slug', '==', slug)
+    const currentOtherMatches = currentMatches.filter(
+      (match) => match._id !== originalId,
+    ) // exclude current document
+    return currentOtherMatches.length > 0 || previousOtherMatches.length > 0
+  }
+
+  public validateUrl = async (value: any) => {
+    return value ? (isUrl(value) ? undefined : 'Invalid url') : 'Required'
+  }
   // this can be subscribed to in individual stores
-  constructor(private rootStore: RootStore, private basePath?: IDBEndpoint) {
+  constructor(private rootStore?: RootStore, private basePath?: IDBEndpoint) {
     if (!rootStore) {
       this.rootStore = useCommonStores()
     }
@@ -50,22 +78,25 @@ export class ModuleStore {
 
   // use getters for root store bindings as will not be available during constructor method
   get db() {
-    return this.rootStore.dbV2
+    return this.rootStore!.dbV2
   }
 
   get activeUser() {
-    return this.rootStore.stores.userStore.user
+    return this.rootStore!.stores.userStore.user
   }
 
   get userStore() {
-    return this.rootStore.stores.userStore
+    return this.rootStore!.stores.userStore
   }
 
   get mapsStore() {
-    return this.rootStore.stores.mapsStore
+    return this.rootStore!.stores.mapsStore
   }
   get aggregationsStore() {
-    return this.rootStore.stores.aggregationsStore
+    return this.rootStore!.stores.aggregationsStore
+  }
+  get userNotificationsStore() {
+    return this.rootStore!.stores.userNotificationsStore
   }
 
   /****************************************************************************
@@ -73,74 +104,9 @@ export class ModuleStore {
    * **************************************************************************/
 
   // when accessing a collection want to call the database getCollection method which
-  // efficiently checks the cache first and emits any subsequent updates
-  private _subscribeToCollection(endpoint: IDBEndpoint) {
-    this.allDocs$.next([])
-    this.activeCollectionSubscription.unsubscribe()
-    this.activeCollectionSubscription = this.db
-      .collection(endpoint)
-      .stream((data) => {
-        this.allDocs$.next(data)
-      })
-  }
-
-  /****************************************************************************
-   *            Data Validation Methods
-   * **************************************************************************/
-
-  public checkIsUnique = async (
-    endpoint: IDBEndpoint,
-    field: string,
-    value: string,
-    originalId?: string,
-  ) => {
-    const matches = await this.db
-      .collection(endpoint)
-      .getWhere(field, '==', value)
-    if (
-      typeof originalId !== 'undefined' &&
-      matches.length === 1 &&
-      matches[0]._id === originalId
-    ) {
-      return true
-    }
-    return matches.length > 0 ? false : true
-  }
-
-  /** Validator method to pass to react-final-form. Takes a given title,
-   *  converts to corresponding slug and checks uniqueness.
-   *  Provide originalId to prevent matching against own entry.
-   *  NOTE - return value represents the error, so FALSE actually means valid
-   */
-  public validateTitleForSlug = async (
-    title: string,
-    endpoint: IDBEndpoint,
-    originalId?: string,
-  ) => {
-    if (title) {
-      const slug = stripSpecialCharacters(title).toLowerCase()
-      const unique = await this.checkIsUnique(
-        endpoint,
-        'slug',
-        slug,
-        originalId,
-      )
-      return unique
-        ? false
-        : 'Titles must be unique, please try being more specific'
-    } else {
-      // if no title submitted, simply return message to say that it is required
-      return 'Required'
-    }
-  }
-
-  public validateUrl = async (value: any) => {
-    return value ? (isUrl(value) ? undefined : 'Invalid url') : 'Required'
-  }
   /****************************************************************************
    *            Filtering Methods
    * **************************************************************************/
-
   public filterCollectionByTags<T extends ICollectionWithTags>(
     collection: T[] = [],
     selectedTags: ISelectedTags,
@@ -161,7 +127,6 @@ export class ModuleStore {
       return obj.location.name === selectedLocation.name
     })
   }
-
   public async uploadFileToCollection(
     file: File | IConvertedFileMeta | IUploadedFileMeta,
     collection: string,
@@ -169,13 +134,13 @@ export class ModuleStore {
   ) {
     logger.debug('uploading file', file)
     // if already uploaded (e.g. editing but not replaced), skip
-    if (file.hasOwnProperty('downloadUrl')) {
+    if (Object.prototype.hasOwnProperty.call(file, 'downloadUrl')) {
       logger.debug('file already uploaded, skipping')
       return file as IUploadedFileMeta
     }
     // switch between converted file meta or standard file input
     let data: File | Blob = file as File
-    if (file.hasOwnProperty('photoData')) {
+    if (Object.prototype.hasOwnProperty.call(file, 'photoData')) {
       file = file as IConvertedFileMeta
       data = file.photoData
     }
@@ -186,7 +151,6 @@ export class ModuleStore {
       file.type,
     )
   }
-
   public async uploadCollectionBatch(
     files: (File | IConvertedFileMeta)[],
     collection: string,
@@ -196,6 +160,16 @@ export class ModuleStore {
       return this.uploadFileToCollection(file, collection, id)
     })
     return Promise.all(promises)
+  }
+  // efficiently checks the cache first and emits any subsequent updates
+  private _subscribeToCollection(endpoint: IDBEndpoint) {
+    this.allDocs$.next([])
+    this.activeCollectionSubscription.unsubscribe()
+    this.activeCollectionSubscription = this.db
+      .collection(endpoint)
+      .stream((data) => {
+        this.allDocs$.next(data)
+      })
   }
 }
 

@@ -11,11 +11,9 @@ describe('getSupportedModules', () => {
       MODULE.CORE,
       MODULE.HOWTO,
       MODULE.MAP,
-      MODULE.EVENTS,
       MODULE.RESEARCH,
       MODULE.ACADEMY,
       MODULE.USER,
-      MODULE.ADMIN,
     ])
   })
 
@@ -25,12 +23,8 @@ describe('getSupportedModules', () => {
   })
 
   it('loads multiple modules based on env configuration', () => {
-    process.env.REACT_APP_SUPPORTED_MODULES = ` ${MODULE.HOWTO},${MODULE.EVENTS} `
-    expect(getSupportedModules()).toStrictEqual([
-      MODULE.CORE,
-      MODULE.HOWTO,
-      MODULE.EVENTS,
-    ])
+    process.env.REACT_APP_SUPPORTED_MODULES = ` ${MODULE.HOWTO} `
+    expect(getSupportedModules()).toStrictEqual([MODULE.CORE, MODULE.HOWTO])
   })
 
   it('ignores a malformed module definitions', () => {
@@ -50,6 +44,7 @@ describe('isModuleSupported', () => {
   })
 
   it('returns false for unsupported module', () => {
-    expect(isModuleSupported(MODULE.EVENTS)).toBe(false)
+    process.env.REACT_APP_SUPPORTED_MODULES = `${MODULE.HOWTO}`
+    expect(isModuleSupported(MODULE.RESEARCH)).toBe(false)
   })
 })
